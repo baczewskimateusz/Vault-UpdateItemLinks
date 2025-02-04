@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Autodesk.Connectivity.Extensibility.Framework;
@@ -44,38 +45,85 @@ namespace UpdateItemLinks
 
         private void UpdateItemLinks(IJobProcessorServices context, IJob job)
         {
-            int fileId = int.Parse(job.Params["FileId"]);
+            long fileId = long.Parse(job.Params["FileId"]);
+     
             Connection vaultConnection = context.Connection;
 
-            Item item =vaultConnection.WebServiceManager.ItemService.GetItemsByFileId(fileId).First();
+            WebServiceManager webServiceManager = vaultConnection.WebServiceManager;
+            ItemService itemService = webServiceManager.ItemService;
 
-            Refresh_ItemLinks(item, vaultConnection);
+            Item item = itemService.GetItemsByFileId(fileId).First();
+
+            try
+            {
+                RefreshItemLinks(item, vaultConnection);
+            }
+            catch
+            {
+                throw;
+            }
         }
 
-        public void Refresh_ItemLinks(Item editItem, Connection vaultConn)
+        public void RefreshItemLinks(Item editItem, Connection vaultConn)
         {
-            var linkTypeOptions = ItemFileLnkTypOpt.Primary
-                | ItemFileLnkTypOpt.PrimarySub
-                | ItemFileLnkTypOpt.Secondary
-                | ItemFileLnkTypOpt.SecondarySub
-                | ItemFileLnkTypOpt.StandardComponent
-                | ItemFileLnkTypOpt.Tertiary;
-            var assocs = vaultConn.WebServiceManager.ItemService.GetItemFileAssociationsByItemIds(
-                new long[] { editItem.Id }, linkTypeOptions);
-            vaultConn.WebServiceManager.ItemService.AddFilesToPromote(
-                assocs.Select(x => x.CldFileId).ToArray(), ItemAssignAll.No, true);
-            var promoteOrderResults = vaultConn.WebServiceManager.ItemService.GetPromoteComponentOrder(out DateTime timeStamp);
-            if (promoteOrderResults.PrimaryArray != null
-                && promoteOrderResults.PrimaryArray.Any())
+            WebServiceManager webServiceManager = vaultConn.WebServiceManager;
+            ItemService itemService = webServiceManager.ItemService;
+
+            try
             {
-                vaultConn.WebServiceManager.ItemService.PromoteComponents(timeStamp, promoteOrderResults.PrimaryArray);
+                //    var linkTypeOptions = ItemFileLnkTypOpt.Primary
+                //    | ItemFileLnkTypOpt.PrimarySub
+                //    | ItemFileLnkTypOpt.Secondary
+                //    | ItemFileLnkTypOpt.SecondarySub
+                //    | ItemFileLnkTypOpt.StandardComponent
+                //    | ItemFileLnkTypOpt.Tertiary;
+                //    var assocs = itemService.GetItemFileAssociationsByItemIds(
+                //        new long[] { editItem.Id }, linkTypeOptions);
+                //    itemService.AddFilesToPromote(assocs.Select(x => x.CldFileId).ToArray(), ItemAssignAll.No, true);
+                //    var promoteOrderResults = itemService.GetPromoteComponentOrder(out DateTime timeStamp);
+                //    if (promoteOrderResults.PrimaryArray != null
+                //        && promoteOrderResults.PrimaryArray.Any())
+                //    {
+                //        itemService.PromoteComponents(timeStamp, promoteOrderResults.PrimaryArray);
+                //    }
+                //    if (promoteOrderResults.NonPrimaryArray != null
+                //        && promoteOrderResults.NonPrimaryArray.Any())
+                //    {
+                //        itemService.PromoteComponentLinks(promoteOrderResults.NonPrimaryArray);
+                //    }
+                //    var promoteResult = itemService.GetPromoteComponentsResults(timeStamp);
+
+                //    Item[] items = promoteResult.ItemRevArray;
+
+
+                //    itemService.UpdateAndCommitItems(items);
+
+                itemService.UpdatePromoteComponents(new long[] { editItem.RevId } ,
+                    ItemAssignAll.Default, false);
+
+                DateTime timestamp;
+
+                GetPromoteOrderResults promoteOrder =
+
+                    itemService.GetPromoteComponentOrder(out timestamp);
+
+                itemService.PromoteComponents(timestamp, promoteOrder.PrimaryArray);
+
+                ItemsAndFiles itemsAndFiles =
+                    itemService.GetPromoteComponentsResults(timestamp);
+
+                List<Item> items = itemsAndFiles.ItemRevArray
+                        .Where((x, index) => itemsAndFiles.StatusArray[index] == 4)
+                        .ToList();
+
+                itemService.UpdateAndCommitItems(items.ToArray());
+
             }
-            if (promoteOrderResults.NonPrimaryArray != null
-                && promoteOrderResults.NonPrimaryArray.Any())
+            catch
             {
-                vaultConn.WebServiceManager.ItemService.PromoteComponentLinks(promoteOrderResults.NonPrimaryArray);
+                itemService.UndoEditItems(new long[] { editItem.Id });
+                throw;
             }
-            var promoteResult = vaultConn.WebServiceManager.ItemService.GetPromoteComponentsResults(timeStamp);
         }
 
         public void OnJobProcessorShutdown(IJobProcessorServices context)
